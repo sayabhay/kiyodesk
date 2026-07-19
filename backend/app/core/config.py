@@ -68,8 +68,11 @@ class Settings(BaseSettings):
 
     # Strategy Engine candle configuration
     strategy_timeframe: str = "15m"
-    strategy_htf_timeframe: str = "4h"
+    # HTF override — leave empty to auto-resolve via DEFAULT_HTF_MAP in timeframe_config.py.
+    # When set, this exact timeframe is used as HTF regardless of the LTF.
+    strategy_htf_timeframe: str = ""
     strategy_candle_limit: int = Field(default=200, ge=50, le=1000)
+    strategy_htf_candle_limit: int = Field(default=100, ge=20, le=500)
 
     cache_seconds: int = Field(default=60, ge=1)
     scheduler_enabled: bool = True
