@@ -1,4 +1,4 @@
-"""StrategyRuntime — loads market history, runs the Strategy Engine, persists opportunities.
+"""StrategyRuntime — fetches real OHLCV candles, runs the Strategy Engine, persists opportunities.
 
 This is the only component allowed to connect:
     Market Data  →  Strategy Engine  →  Trade Opportunities
@@ -7,48 +7,23 @@ The Scheduler calls MarketListener (below) after each successful symbol refresh.
 MarketListener delegates here.  The Scheduler itself has no business logic.
 """
 
-from decimal import Decimal
+import asyncio
 
 from loguru import logger
 
 from app.core.config import Settings
 from app.database.session import AsyncSessionLocal
-from app.domain.strategy.interfaces.bar import Bar
 from app.domain.strategy.models.config import StrategyConfig
 from app.domain.strategy.services.strategy_service import StrategyService
-from app.models.market_data import MarketData
 from app.models.trade_opportunity import TradeOpportunity
-from app.repositories.market_data_repository import MarketDataRepository
+from app.providers.candles import fetch_candles
 from app.repositories.opportunity_repository import OpportunityRepository
 from app.runtime.deduplicator import Deduplicator
 from app.runtime.opportunity_manager import OpportunityManager
 
-_ZERO = Decimal("0")
-
-
-def _market_data_to_bar(row: MarketData) -> Bar:
-    """Convert a MarketData snapshot to a Bar.
-
-    MarketData stores a single price point per capture, not candlestick OHLC.
-    We map all four price fields to the same value (open=high=low=close=price).
-    Volume is zero — the strategy engine does not use volume for ICT Pure OTE.
-
-    TODO (future sprint): replace with resampled OHLCV candles when a candle
-    history endpoint is available from the Provider Engine.
-    """
-    price = row.price if row.price is not None else _ZERO
-    return Bar(
-        timestamp=row.captured_at,
-        open=price,
-        high=price,
-        low=price,
-        close=price,
-        volume=_ZERO,
-    )
-
 
 class StrategyRuntime:
-    """Orchestrate market data loading, strategy evaluation, and opportunity persistence."""
+    """Orchestrate real OHLCV candle fetching, strategy evaluation, and opportunity persistence."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -57,12 +32,12 @@ class StrategyRuntime:
         """Evaluate the strategy for a symbol after a market data refresh.
 
         Steps:
-        1. Load recent bar history from market_data table.
-        2. Convert rows to Bar objects.
-        3. Run StrategyService with default config (use_htf_trend=False until
-           true HTF candles are available — TODO: enable when candle feed lands).
-        4. If no setup detected, return None.
-        5. Create or update a TradeOpportunity via OpportunityManager.
+        1. Fetch real OHLCV candles from Binance Futures (public, no API key).
+           LTF: configured timeframe (default 15m), 200 bars.
+           HTF: configured HTF timeframe (default 4h), 100 bars.
+        2. Run StrategyService (bar-by-bar replay matching kScript behaviour).
+        3. If no setup detected, return None.
+        4. Create or update a TradeOpportunity via OpportunityManager.
 
         Parameters
         ----------
@@ -72,51 +47,63 @@ class StrategyRuntime:
         -------
         The created or updated TradeOpportunity, or None if no setup was found.
         """
-        async with AsyncSessionLocal() as session:
-            market_repo = MarketDataRepository(session)
+        ltf_interval = self._settings.strategy_timeframe      # e.g. "15m"
+        htf_interval = self._settings.strategy_htf_timeframe  # e.g. "4h"
+        ltf_limit    = self._settings.strategy_candle_limit    # e.g. 200
+        htf_limit    = 100
 
-            # Load LTF history (last 200 bars)
-            ltf_rows, _ = await market_repo.list_history(symbol, limit=200)
-            if len(ltf_rows) < 2:
-                logger.debug(
-                    "StrategyRuntime: not enough bars for {} ({} rows).",
-                    symbol,
-                    len(ltf_rows),
-                )
-                return None
-
-            ltf_bars = [_market_data_to_bar(r) for r in ltf_rows]
-
-            # HTF bars: same symbol, last 100 rows.
-            # TODO (Sprint 3+): resample to true higher-timeframe candles.
-            htf_bars = ltf_bars[-100:]
-
-            # Build strategy config.
-            # use_htf_trend=False until proper HTF candles are available; the
-            # HTF filter on single-price snapshots is not meaningful.
-            config = StrategyConfig(use_htf_trend=False)
-
-            # Run the strategy.
-            service = StrategyService()
-            setup = service.evaluate(
-                bars=ltf_bars,
-                htf_bars=htf_bars,
-                symbol=symbol,
-                config=config,
+        try:
+            ltf_bars, htf_bars = await asyncio.gather(
+                fetch_candles(symbol, interval=ltf_interval, limit=ltf_limit),
+                fetch_candles(symbol, interval=htf_interval, limit=htf_limit),
             )
-
-            if setup is None:
-                logger.debug("StrategyRuntime: no setup detected for {}.", symbol)
-                return None
-
-            logger.info(
-                "StrategyRuntime: setup detected for {} — {} @ {}.",
+        except Exception as exc:
+            logger.warning(
+                "StrategyRuntime: candle fetch failed for {} — {}. Skipping evaluation.",
                 symbol,
-                setup.direction,
-                setup.entry,
+                exc,
             )
+            return None
 
-            # Persist opportunity.
+        if len(ltf_bars) < 2:
+            logger.debug(
+                "StrategyRuntime: not enough LTF bars for {} ({}).",
+                symbol,
+                len(ltf_bars),
+            )
+            return None
+
+        logger.debug(
+            "StrategyRuntime: {} LTF bars + {} HTF bars fetched for {}.",
+            len(ltf_bars),
+            len(htf_bars),
+            symbol,
+        )
+
+        # Full config — HTF trend filter is now meaningful with real 4h candles.
+        config = StrategyConfig(use_htf_trend=len(htf_bars) >= 2)
+
+        service = StrategyService()
+        setup = service.evaluate(
+            bars=ltf_bars,
+            htf_bars=htf_bars,
+            symbol=symbol,
+            config=config,
+            timeframe=ltf_interval,
+        )
+
+        if setup is None:
+            logger.debug("StrategyRuntime: no setup detected for {}.", symbol)
+            return None
+
+        logger.info(
+            "StrategyRuntime: setup detected for {} — {} @ {}.",
+            symbol,
+            setup.direction,
+            setup.entry,
+        )
+
+        async with AsyncSessionLocal() as session:
             opp_repo = OpportunityRepository(session)
             manager = OpportunityManager(
                 repository=opp_repo,
