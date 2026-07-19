@@ -1,5 +1,90 @@
 # Changelog
 
-## v0.1.0
+## v0.5.1 — Replit Deployment & Live Signal Feed
 
-Initial repository
+### Added
+- **Real OHLCV candle feed** (`backend/app/providers/candles.py`) — fetches Binance Futures
+  klines (`/fapi/v1/klines`) with no API key required. LTF (15m, 200 bars) and HTF (4h, 100
+  bars) fetched concurrently on every scheduler tick.
+- **PostgreSQL support** — async engine uses `asyncpg` driver; Alembic migrations use
+  `psycopg2-binary`. SSL handling normalised for Replit's managed database (`sslmode=disable`
+  → `connect_args={"ssl": False}`).
+- `async_database_url` and `sync_database_url` properties on `Settings` for dialect-aware
+  URL construction.
+- `_engine_kwargs()` helper in `session.py` maps `sslmode=disable` to asyncpg `connect_args`.
+
+### Changed
+- **StrategyRuntime** now fetches real OHLCV candles from Binance Futures directly instead of
+  converting single-price `market_data` rows into flat `open=high=low=close=price` bars.
+  HTF trend filter (`use_htf_trend`) is now enabled — real 4h candles make the EMA slope
+  filter meaningful.
+- **Provider order** changed to `binance,coingecko` — Binance Futures public endpoints supply
+  funding rate and open interest; CoinGecko is the price-only fallback.
+- **CORS policy** broadened to `allow_origins=["*"]` with `allow_credentials=False` for
+  Replit proxy compatibility.
+- **Vite dev server** configured with `host: "0.0.0.0"`, `allowedHosts: true`, and a
+  `/api` proxy to `http://localhost:8000` so the frontend works from any external browser.
+- **API base URL** in `frontend/src/api.ts` changed from the hardcoded
+  `http://localhost:8000/api/v1` to the relative `/api/v1`. This fixes "Failed to load"
+  errors when the app is opened outside Replit's preview pane.
+
+### Fixed
+- `asyncpg` `connect()` rejected `sslmode` keyword argument from PostgreSQL URL —
+  stripped from async URL and mapped to engine `connect_args`.
+- Frontend API calls failed in external browsers because `localhost:8000` resolved to the
+  user's own machine rather than the Replit container.
+
+---
+
+## v0.5.0 — Strategy Engine: ICT Pure OTE
+
+Initial release of the Strategy Engine — faithful Python port of the ICT Pure OTE kScript.
+
+### Added
+- `StrategyEngine` — stateful orchestrator with `ZoneState` persisting across bar evaluations.
+- Swing pivot detection (`swing.py`) — strict pivot high/low matching kScript `pivothigh/pivotlow`.
+- Break of Structure detection (`bos.py`) — close-crossover BOS (up and down).
+- HTF EMA trend filter (`htf_trend.py`) — EMA slope using `k = 2 / (period + 1)`, fail-open when insufficient bars.
+- OTE zone state machine (`ote.py`) — arm on BOS, tap check (wick or close-back), disarm after tap.
+- Risk calculation (`risk.py`) — Fixed RR and Fib Extension TP modes; entry guard before TP.
+- `StrategyService` — stateless bar-by-bar replay facade, public API boundary.
+- `TradeSetup` domain object — serializable, carries `config_snapshot` for audit trail.
+- `TradeOpportunity` model — persisted setup with full lifecycle state machine.
+- `LifecycleManager` — owns all status transitions; raises `InvalidTransitionError` on illegal moves.
+- `OpportunityManager` — create-or-update with `Deduplicator` (entry ± tolerance check).
+- REST endpoints: `GET /opportunities`, `GET /opportunities/active`, `GET /opportunities/{id}`,
+  `POST /opportunities/{id}/accept`, `POST /opportunities/{id}/reject`.
+- `CCXTProvider` — exchange-configurable provider (binance/bybit/bitget/okx), concurrent
+  ticker + funding + OI fetch, per-request exchange instances.
+
+---
+
+## v0.4.0 — Analytics
+
+- Analytics aggregation endpoint: win rate, profit factor, expectancy, per-symbol breakdowns.
+- Analytics section on dashboard.
+
+---
+
+## v0.3.0 — React Dashboard
+
+- React 18 + TypeScript + Vite + TailwindCSS frontend.
+- Live Market section with price charts (ECharts).
+- Trade Journal UI with close / delete actions.
+
+---
+
+## v0.2.0 — Trade Journal & Market Snapshots
+
+- `market_data` table and scheduler-driven snapshots (60s interval).
+- Trade Journal model, REST endpoints (CRUD + close).
+- Provider failover via `ProviderManager`.
+
+---
+
+## v0.1.0 — Initial Repository
+
+- FastAPI application factory with lifespan management.
+- `BinanceProvider`, `CoinGeckoProvider`, `KiyotakaProvider` base implementations.
+- SQLAlchemy async session + Alembic migration scaffold.
+- APScheduler integration for market data collection.

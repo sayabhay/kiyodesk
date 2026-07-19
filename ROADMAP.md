@@ -14,17 +14,17 @@ produced by the Domain Engine. Raw market data never reaches the AI layer direct
 Provider Engine
       ↓
 Domain Engine
-  ├── Strategy Engine
-  ├── Confidence Engine
-  ├── Market Regime Engine
-  ├── Replay Engine (future)
-  └── Analytics Extensions
+  ├── Strategy Engine       ✅ v0.5 — ICT Pure OTE, live signals on BTC/ETH
+  ├── Confidence Engine     🔲 v0.6
+  ├── Market Regime Engine  🔲 v0.7
+  ├── Replay Engine         🔲 v0.9
+  └── Analytics Extensions  ✅
       ↓
-Trade Journal
+Trade Journal               ✅
       ↓
-Dashboard
+Dashboard                   ✅
       ↓
-AI Assistant
+AI Assistant                🔲 v1.0
 ```
 
 ## Releases
@@ -33,7 +33,8 @@ AI Assistant
 - **0.2** ✅ Trade journal and market snapshots
 - **0.3** ✅ React dashboard
 - **0.4** ✅ Analytics
-- **0.5** Strategy Engine — ICT Pure OTE (optimal trade entry, PD arrays, displacement detection)
+- **0.5** ✅ Strategy Engine — ICT Pure OTE live on Replit; real OHLCV candles from Binance Futures; HTF trend filter active; signals firing on BTC and ETH
+- **0.5.1** ✅ Replit deployment — PostgreSQL, asyncpg SSL fix, relative API base URL, Vite proxy
 - **0.6** Confidence Engine — multi-factor signal scoring fed by Strategy Engine outputs
 - **0.7** Market Regime Engine — trend/range/expansion classification; gates Strategy Engine signals
 - **0.8** Multi-layer Chart Engine — annotated chart rendering driven by Domain Engine outputs

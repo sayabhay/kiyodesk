@@ -8,7 +8,7 @@ the Strategy Engine, and the Trade Journal into a single automated trading lifec
 It is the **only** component allowed to connect:
 
 ```
-Market Data  →  Strategy Engine  →  Trade Opportunities  →  Trade Journal
+Candle Feed  →  Strategy Engine  →  Trade Opportunities  →  Trade Journal
 ```
 
 No other layer may directly trigger strategy evaluation or create trade opportunities.
@@ -19,10 +19,11 @@ No other layer may directly trigger strategy evaluation or create trade opportun
 
 | Constraint | Rationale |
 |---|---|
-| Scheduler collects data only | Keeps the Scheduler a pure I/O layer with no business logic |
+| Scheduler collects market snapshots only | Keeps the Scheduler a pure I/O layer with no business logic |
 | Runtime is the only orchestrator | Single point of responsibility for the trading lifecycle |
-| Strategy Engine is never modified | Sprint 2 is frozen; the Runtime only calls it |
+| Strategy Engine is never modified | The kScript is the canonical reference; the Runtime only calls it |
 | AI never receives raw market data | The Runtime produces structured Domain Engine outputs; AI consumes those |
+| Candle fetching is Runtime's responsibility | Decouples candle data from snapshot storage — snapshots and OHLCV serve different purposes |
 
 ---
 
@@ -31,11 +32,13 @@ No other layer may directly trigger strategy evaluation or create trade opportun
 ```
 app/runtime/
   __init__.py
-  strategy_runtime.py    — orchestrator: loads bars, runs strategy, persists opportunity
-  market_listener.py     — callback adapter: called by scheduler after each refresh
+  strategy_runtime.py    — orchestrator: fetches OHLCV candles, runs strategy, persists opportunity
+  market_listener.py     — callback adapter: called by scheduler after each market refresh
   opportunity_manager.py — create-or-update TradeOpportunity with deduplication
   lifecycle_manager.py   — status transitions for TradeOpportunity
   deduplicator.py        — prevents duplicate ACTIVE opportunities
+
+app/providers/candles.py — Binance Futures kline fetcher (no API key required)
 ```
 
 ---
@@ -44,16 +47,17 @@ app/runtime/
 
 ```
 MarketScheduler._refresh_all(symbol)
-      ↓  [data collection — no business logic]
+      ↓  [market snapshot — price, funding, OI stored to DB]
 MarketService.get_snapshot(symbol)  →  market_data table updated
       ↓  [on_refresh callback]
 MarketListener.__call__(symbol)
       ↓
 StrategyRuntime.on_market_update(symbol)
       ↓
-  1. MarketDataRepository.list_history(symbol, limit=200)
-  2. Convert MarketData rows → list[Bar]
-  3. StrategyService.evaluate(bars, htf_bars, symbol, config)
+  1. fetch_candles(symbol, interval="15m", limit=200)  ← LTF from Binance Futures
+  2. fetch_candles(symbol, interval="4h",  limit=100)  ← HTF from Binance Futures
+     (fetched concurrently via asyncio.gather)
+  3. StrategyService.evaluate(ltf_bars, htf_bars, symbol, config)
   4. If TradeSetup is None → return None
   5. OpportunityManager.create_or_update(setup)
       ↓  [deduplication check]
@@ -66,10 +70,35 @@ TradeOpportunity persisted → available on GET /api/v1/opportunities/active
 
 ---
 
+## Candle Feed
+
+The Runtime fetches real OHLCV bars directly from the **Binance Futures public API**
+(`/fapi/v1/klines`) — no API key required. This replaces the previous approach of
+converting single-price `market_data` snapshots into flat `open=high=low=close=price` bars.
+
+```python
+# app/providers/candles.py
+async def fetch_candles(symbol: str, interval: str = "15m", limit: int = 200) -> list[Bar]:
+    """Fetch OHLCV bars from Binance Futures (public, no API key)."""
+    ...
+```
+
+**Symbol map** (internal `BTC`/`ETH` → Binance instrument):
+
+| App symbol | Binance instrument |
+|---|---|
+| `BTC` | `BTCUSDT` |
+| `ETH` | `ETHUSDT` |
+
+Each `Bar` has `timestamp` (UTC), `open`, `high`, `low`, `close`, `volume` as `Decimal`.
+Bars are returned in chronological order (oldest first).
+
+---
+
 ## Scheduler Integration
 
 The Scheduler accepts an optional `on_refresh: Callable[[str], Awaitable[None]]` callback.
-It is called **after** a successful market data refresh for each symbol.
+It is called **after** a successful market snapshot refresh for each symbol.
 
 ```python
 # In main.py lifespan:
@@ -86,40 +115,22 @@ never propagates back to the Scheduler.
 
 ---
 
-## Bar Loading
-
-Market data is stored as single-price snapshots in the `market_data` table
-(one row per 60-second scheduler tick).  The Runtime converts each row to a `Bar`
-with `open = high = low = close = price` and `volume = 0`.
-
-```python
-def _market_data_to_bar(row: MarketData) -> Bar:
-    price = row.price or Decimal("0")
-    return Bar(timestamp=row.captured_at, open=price, high=price,
-               low=price, close=price, volume=Decimal("0"))
-```
-
-**TODO (future sprint):** Replace with true OHLCV candles when a candle-history
-endpoint is available from the Provider Engine. Until then:
-- `use_htf_trend = False` (HTF EMA slope on single-price bars is not meaningful)
-- Swing detection and BOS work correctly on close-only data
-
----
-
 ## Configuration
 
-The `StrategyRuntime` uses `StrategyConfig` defaults for all evaluations.
+Strategy evaluation uses `StrategyConfig` with settings driven by environment variables:
+
+| Parameter | Env var | Value | Notes |
+|---|---|---|---|
+| `use_htf_trend` | — | `True` when HTF bars ≥ 2 | Enabled — real 4h candles available |
+| LTF interval | `STRATEGY_TIMEFRAME` | `15m` | kScript default |
+| HTF interval | `STRATEGY_HTF_TIMEFRAME` | `4h` | kScript default |
+| LTF bar count | `STRATEGY_CANDLE_LIMIT` | `200` | kScript default |
+| `swing_len` | — | `5` | kScript default |
+| `invalidate_on_close` | — | `True` | kScript default |
+| `tp_mode` | — | `"Fixed RR"` | kScript default |
+| `rr_ratio` | — | `2.0` | kScript default |
+
 Per-symbol config overrides are a planned future feature.
-
-Key defaults applied by the Runtime:
-
-| Parameter | Value | Reason |
-|---|---|---|
-| `use_htf_trend` | `False` | Single-price bars — HTF slope filter not meaningful yet |
-| `swing_len` | `5` | kScript default |
-| `invalidate_on_close` | `True` | kScript default |
-| `tp_mode` | `"Fixed RR"` | kScript default |
-| `rr_ratio` | `2.0` | kScript default |
 
 ---
 
@@ -130,6 +141,7 @@ Key defaults applied by the Runtime:
 | `MarketScheduler` | Catches data fetch errors per symbol; logs + continues |
 | `MarketScheduler` | Catches `on_refresh` callback errors per symbol; logs + continues |
 | `MarketListener` | Catches all `StrategyRuntime` errors; logs + swallows |
-| `StrategyRuntime` | Returns `None` on insufficient data; propagates unexpected errors |
+| `StrategyRuntime` | Catches candle fetch failures; logs warning + returns `None` |
+| `StrategyRuntime` | Returns `None` on insufficient bars; propagates unexpected errors |
 
 A runtime failure for one symbol never affects another symbol's evaluation.

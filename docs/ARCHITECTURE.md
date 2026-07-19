@@ -8,17 +8,18 @@ Journal, or AI — ever analyzes raw market data directly.
 
 ```
 Provider Engine
-  ├── KiyotakaProvider   — price + funding + OI + liquidations (API key required)
+  ├── BinanceProvider    — price + funding + OI (Futures public API, no key required)  ← default first
+  ├── CoinGeckoProvider  — price only (no key required)                                ← fallback
   ├── CCXTProvider       ✅ v0.5  — price + funding + OI (exchange-configurable, no key needed)
-  ├── BinanceProvider    — price + funding + OI (no liquidations, no key required)
-  └── CoinGeckoProvider  — price only (no key required)
+  └── KiyotakaProvider   — price + funding + OI + liquidations (API key required)
       ↓
-Market Scheduler              — data collection only, no business logic
+Market Scheduler              — snapshot collection only, no business logic
       ↓
-Trading Runtime               ✅ v0.5  — orchestrates the complete trading lifecycle
+Trading Runtime               ✅ v0.5.1  — fetches real OHLCV candles, orchestrates lifecycle
+  └── CandleFeed (Binance Futures /fapi/v1/klines — public, no API key)
       ↓
 Domain Engine
-  ├── Strategy Engine         ✅ v0.5  — ICT Pure OTE, produces TradeSetup
+  ├── Strategy Engine         ✅ v0.5  — ICT Pure OTE, produces TradeSetup (live signals on BTC/ETH)
   ├── Confidence Engine       🔲 v0.6  — multi-factor signal confidence scoring
   ├── Market Regime Engine    🔲 v0.7  — trend/range/expansion classification
   ├── Replay Engine           🔲 v0.9  — historical scenario replay
@@ -35,7 +36,7 @@ AI Assistant                  🔲 v1.0  — explains Domain Engine outputs
 
 ---
 
-## Complete Sequence Diagram (Sprint 2.5)
+## Complete Sequence Diagram
 
 ```mermaid
 sequenceDiagram
@@ -44,6 +45,7 @@ sequenceDiagram
     participant DB as market_data table
     participant Listener as MarketListener
     participant Runtime as StrategyRuntime
+    participant Candles as CandleFeed (Binance Futures)
     participant Strategy as StrategyService
     participant OppMgr as OpportunityManager
     participant OppDB as trade_opportunities table
@@ -53,12 +55,16 @@ sequenceDiagram
     participant Journal as trades table
 
     Scheduler->>Provider: get_snapshot(symbol)
-    Provider-->>DB: store MarketData row
+    Provider-->>DB: store MarketData row (price, funding, OI)
     Scheduler->>Listener: on_refresh(symbol)
     Listener->>Runtime: on_market_update(symbol)
-    Runtime->>DB: list_history(symbol, limit=200)
-    DB-->>Runtime: list[MarketData]
-    Runtime->>Strategy: evaluate(bars, htf_bars, config)
+
+    par Concurrent candle fetch
+        Runtime->>Candles: fetch_candles(symbol, "15m", 200) → LTF bars
+        Runtime->>Candles: fetch_candles(symbol, "4h",  100) → HTF bars
+    end
+
+    Runtime->>Strategy: evaluate(ltf_bars, htf_bars, config)
     Strategy-->>Runtime: TradeSetup | None
 
     alt TradeSetup detected
@@ -67,7 +73,7 @@ sequenceDiagram
         alt New opportunity
             OppMgr->>OppDB: INSERT TradeOpportunity(ACTIVE)
         else Duplicate
-            OppMgr->>OppDB: UPDATE trade_setup_json
+            OppMgr->>OppDB: UPDATE trade_setup_json, updated_at
         end
         OppDB-->>Runtime: TradeOpportunity
     end
@@ -88,44 +94,68 @@ sequenceDiagram
 ## Layer Responsibilities
 
 ### Provider Engine
-Fetches and caches raw market data from external sources (Kiyotaka, Binance, CoinGecko).
-Enforces rate limiting. Provides data to the Domain Engine only via the Market Scheduler.
+
+Fetches and caches raw market snapshots from external sources. Enforces rate limiting.
+Provides snapshot data to the Market Scheduler only.
 
 **Providers (failover order configurable via `MARKET_PROVIDERS`):**
 
-| Provider | Data | Key required |
-|---|---|---|
-| `kiyotaka` | price, funding, OI, liquidations | ✅ |
-| `ccxt_{exchange}` ✅ | price, funding, OI — exchange-configurable (binance/bybit/bitget/okx) | ❌ (public endpoints) |
-| `binance` | price, funding, OI | ❌ |
-| `coingecko` | price only | ❌ |
+| Provider | Data | Key required | Default order |
+|---|---|---|---|
+| `binance` | price, funding rate, OI | ❌ | 1st |
+| `coingecko` | price only | ❌ | 2nd (fallback) |
+| `ccxt_{exchange}` | price, funding, OI — exchange-configurable | ❌ (public endpoints) | optional |
+| `kiyotaka` | price, funding, OI, liquidations | ✅ | optional |
 
 **CCXTProvider notes:**
-- `liquidation_volume` is always `None` — CCXT 4.4.30 does not implement `fetchLiquidations` for supported exchanges. Kiyotaka remains the only source of liquidation data.
-- OI is computed as `openInterestAmount × price` (CCXT returns base-currency amount; USD value requires multiplication).
+- `liquidation_volume` is always `None` — CCXT 4.4.30 does not implement `fetchLiquidations`.
+  Kiyotaka is the only source of liquidation data.
+- OI is computed as `openInterestAmount × price` (CCXT returns base-currency amount).
 - Exchange is configurable: `CCXT_EXCHANGE=binance|bybit|bitget|okx`
 - Exchange instances are created per-request to avoid CCXT async event-loop issues.
 
+### Candle Feed (`app/providers/candles.py`)
+
+Fetches real OHLCV candlestick bars from the **Binance Futures public API**
+(`/fapi/v1/klines`). No API key required. Called directly by the Trading Runtime
+on every scheduler tick — separate from the snapshot Provider Engine.
+
+```
+fetch_candles(symbol, interval, limit) → list[Bar]
+  symbol: "BTC" | "ETH"  →  mapped to "BTCUSDT" | "ETHUSDT"
+  interval: "15m" (LTF) | "4h" (HTF)
+  limit: 200 (LTF) | 100 (HTF)
+```
+
 ### Market Scheduler
-Collects market data on a 60-second interval. Calls the `on_refresh` callback after
+
+Collects market snapshots on a 60-second interval. Calls the `on_refresh` callback after
 each successful symbol refresh. **Contains no business logic.**
 
-### Trading Runtime ✅ v0.5
-The orchestration layer connecting all Domain Engine components. The **only** component
-allowed to connect Market Data → Strategy Engine → Trade Opportunities → Trade Journal.
+### Trading Runtime ✅ v0.5.1
+
+The orchestration layer. The **only** component allowed to connect
+Candle Feed → Strategy Engine → Trade Opportunities → Trade Journal.
 
 Modules:
-- `strategy_runtime.py` — loads bars, runs strategy, persists opportunity
+- `strategy_runtime.py` — fetches OHLCV candles, runs strategy, persists opportunity
 - `market_listener.py` — callback adapter; swallows runtime errors
 - `opportunity_manager.py` — create-or-update with deduplication
 - `lifecycle_manager.py` — all status transitions
 - `deduplicator.py` — prevents duplicate ACTIVE opportunities
 
+On every scheduler tick the Runtime:
+1. Fetches 200 LTF bars (15m) and 100 HTF bars (4h) concurrently from Binance Futures
+2. Runs `StrategyService.evaluate()` with `use_htf_trend=True` (real 4h candles available)
+3. If a `TradeSetup` is detected, persists or updates the `TradeOpportunity`
+
 ### Domain Engine
+
 The single source of truth for trading intelligence. Composed of:
 
 - **Strategy Engine** ✅ — detects ICT Pure OTE setups: swing pivots, BOS, HTF EMA
   trend filter, Fibonacci OTE zone, entry/stop/target derivation. Returns `TradeSetup`.
+  Fires live signals on BTC and ETH every 60 seconds.
 - **Confidence Engine** 🔲 — scores `TradeSetup` objects against confluence factors.
   Field `confidence` on `TradeOpportunity` is null until v0.6.
 - **Market Regime Engine** 🔲 — classifies market state (trending, ranging, expanding).
@@ -134,17 +164,23 @@ The single source of truth for trading intelligence. Composed of:
 - **Analytics Extensions** — aggregates performance metrics on Domain Engine outputs.
 
 ### Trade Opportunity ✅ v0.5
+
 A persisted record representing a detected setup awaiting user decision.
 Status machine: `ACTIVE → TAKEN | REJECTED | INVALIDATED | EXPIRED`, `TAKEN → COMPLETED`.
 
 ### Trade Journal
+
 Records trades created from accepted opportunities. Each trade links back to its
 originating `TradeOpportunity` via `trade_id`.
 
 ### Dashboard ✅
-Renders the full application: Live Market, Active Opportunities, Analytics, Trade Journal.
+
+Renders the full application: Signal Center, Live Market, Active Opportunities, Analytics,
+Trade Journal. All API calls use relative `/api/v1` URLs, proxied server-side by Vite —
+works correctly from any external browser, not just Replit's preview pane.
 
 ### AI Assistant *(v1.0 — frozen until v0.7 is complete)*
+
 Explains Domain Engine outputs in natural language. Input: structured Domain Engine data.
 Never receives raw price, funding, or liquidation data.
 
@@ -169,9 +205,9 @@ app/domain/strategy/
 ### Strategy Engine Data Flow
 
 ```
-list[Bar] (LTF)  +  list[Bar] (HTF)  +  StrategyConfig
+list[Bar] LTF (15m, 200 bars)  +  list[Bar] HTF (4h, 100 bars)  +  StrategyConfig
         ↓
-StrategyEngine.evaluate()
+StrategyEngine.evaluate()  [bar-by-bar replay via StrategyService]
         ↓
   swing.detect_pivots()  →  bos.detect_bos()  →  htf_trend.evaluate_trend()
         ↓
@@ -182,15 +218,17 @@ StrategyEngine.evaluate()
 
 ---
 
-## Trading Runtime — Module Map (v0.5)
+## Trading Runtime — Module Map (v0.5.1)
 
 ```
 app/runtime/
-  strategy_runtime.py     Loads bars → runs strategy → persists opportunity
+  strategy_runtime.py     Fetches OHLCV candles → runs strategy → persists opportunity
   market_listener.py      Callback adapter (scheduler → runtime)
   opportunity_manager.py  create_or_update with deduplication
   lifecycle_manager.py    Status transitions + InvalidTransitionError
   deduplicator.py         find_existing() — checks ACTIVE duplicates by entry ± tolerance
+
+app/providers/candles.py  Binance Futures kline fetcher — fetch_candles(symbol, interval, limit)
 
 app/models/trade_opportunity.py   SQLAlchemy model
 app/repositories/opportunity_repository.py  Persistence layer
@@ -221,25 +259,51 @@ CCXT_MARKET_TYPE=future        # future | swap | spot
 CCXT_API_KEY=                  # optional for private endpoints
 CCXT_API_SECRET=               # optional
 CCXT_SYMBOL_MAP=BTC:BTC/USDT:USDT,ETH:ETH/USDT:USDT
-MARKET_PROVIDERS=kiyotaka,ccxt_binance,binance,coingecko
+MARKET_PROVIDERS=binance,coingecko   # default; prepend ccxt_binance if preferred
 ```
 
 **Known limitation:** `liquidation_volume` is always `None` from CCXTProvider.
 CCXT 4.4.30 does not implement `fetchLiquidations` for Binance, Bybit, or Bitget futures.
-Kiyotaka is the only provider that supplies liquidation data. If Kiyotaka's free tier
-rate limit is exceeded, liquidations will show as `—` on the dashboard until the next
-successful Kiyotaka request.
 
 ---
 
-## REST API Surface (Sprint 2.5 additions)
+## Database
+
+KiyoDesk uses **PostgreSQL** on Replit (auto-configured via the `DATABASE_URL`
+environment variable). The async SQLAlchemy engine uses `asyncpg`; Alembic migrations
+use `psycopg2-binary` for synchronous access.
+
+`sslmode=disable` is mapped to `connect_args={"ssl": False}` for asyncpg compatibility.
+
+Schema is managed via Alembic in `backend/alembic/versions/`.
+
+---
+
+## REST API Surface
 
 ```
-GET  /api/v1/opportunities              list all (filter: symbol, status, limit)
-GET  /api/v1/opportunities/active       list ACTIVE opportunities
-GET  /api/v1/opportunities/{id}         get one
-POST /api/v1/opportunities/{id}/accept  accept → create trade journal entry
-POST /api/v1/opportunities/{id}/reject  reject → lifecycle only
+# Market
+GET  /api/v1/market/{symbol}              current snapshot (price, funding, OI)
+GET  /api/v1/market/{symbol}/history      time-series history
+
+# Opportunities
+GET  /api/v1/opportunities                list all (filter: symbol, status, limit)
+GET  /api/v1/opportunities/active         list ACTIVE opportunities
+GET  /api/v1/opportunities/{id}           get one
+POST /api/v1/opportunities/{id}/accept    accept → create trade journal entry
+POST /api/v1/opportunities/{id}/reject    reject → lifecycle only
+
+# Trades (Journal)
+GET    /api/v1/trades                     list trades (filter: symbol)
+POST   /api/v1/trades                     create trade
+PATCH  /api/v1/trades/{id}/close          close trade with exit price
+DELETE /api/v1/trades/{id}               delete trade
+
+# Analytics
+GET  /api/v1/analytics                    aggregated metrics (filter: symbol)
+
+# System
+GET  /api/v1/system/status                provider health and scheduler status
 ```
 
 ---
@@ -283,12 +347,13 @@ Prohibited AI inputs:
 
 - No AI work until v0.5 (Strategy Engine), v0.6 (Confidence Engine), and v0.7
   (Market Regime Engine) are complete and tested.
-- The Scheduler collects data only — it must never evaluate strategies or create trades.
-- The Trading Runtime is the only component allowed to connect market data to the Domain Engine.
-- The Strategy Engine (Sprint 2) is frozen — do not modify without a confirmed defect.
+- The Scheduler collects snapshots only — it must never evaluate strategies or create trades.
+- The Trading Runtime is the only component allowed to connect the Candle Feed to the Domain Engine.
+- The Strategy Engine (`app/domain/strategy/ict/`) is frozen — do not modify without a confirmed defect.
 - The kScript is the canonical reference. Python behavior must match kScript behavior exactly.
 - External code imports from `services/` only — never directly from `ict/`.
 - The Domain Engine must be independently testable without the API, Dashboard, or AI layers.
+- All frontend API calls must use relative URLs (`/api/v1/...`) — never `http://localhost:8000`.
 
 ---
 
