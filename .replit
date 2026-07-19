@@ -12,7 +12,7 @@ expertMode = true
 [userenv.shared]
 APP_ENV = "development"
 LOG_LEVEL = "INFO"
-MARKET_PROVIDERS = "coingecko,binance"
+MARKET_PROVIDERS = "binance,coingecko"
 
 [workflows]
 runButton = "Project"
