@@ -9,7 +9,7 @@ from app.database.base import Base
 from sqlalchemy import engine_from_config, pool
 
 config = context.config
-database_url = get_settings().database_url.replace("+aiosqlite", "")
+database_url = get_settings().sync_database_url
 config.set_main_option("sqlalchemy.url", database_url)
 
 if config.config_file_name is not None:

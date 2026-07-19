@@ -15,6 +15,39 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     database_url: str = "sqlite+aiosqlite:///./kiyodesk.db"
 
+    @property
+    def async_database_url(self) -> str:
+        """Return a database URL suitable for async SQLAlchemy (asyncpg for PostgreSQL).
+
+        asyncpg does not accept psycopg2-style query params such as sslmode=disable.
+        We strip those and map them to asyncpg connect_args instead via engine kwargs.
+        """
+        from urllib.parse import urlparse, urlunparse, urlencode, parse_qs
+
+        url = self.database_url
+        if url.startswith("postgresql://") or url.startswith("postgres://"):
+            parsed = urlparse(url)
+            # Remove params unsupported by asyncpg (sslmode → handled by ssl kwarg)
+            params = parse_qs(parsed.query, keep_blank_values=True)
+            params.pop("sslmode", None)
+            new_query = urlencode({k: v[0] for k, v in params.items()})
+            clean = urlunparse(parsed._replace(query=new_query))
+            return clean.replace("postgresql://", "postgresql+asyncpg://", 1).replace(
+                "postgres://", "postgresql+asyncpg://", 1
+            )
+        return url  # sqlite+aiosqlite:// already correct
+
+    @property
+    def sync_database_url(self) -> str:
+        """Return a database URL suitable for synchronous SQLAlchemy (Alembic)."""
+        url = self.database_url
+        # Strip async drivers
+        return (
+            url.replace("+aiosqlite", "")
+            .replace("+asyncpg", "")
+            .replace("postgresql+asyncpg://", "postgresql://")
+        )
+
     # Kiyotaka
     kiyotaka_api_key: str | None = Field(default=None, repr=False)
     kiyotaka_base_url: str = "https://api.kiyotaka.ai"

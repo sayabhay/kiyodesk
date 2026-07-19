@@ -10,7 +10,17 @@ from app.core.config import get_settings
 from app.database.base import Base
 
 settings = get_settings()
-engine = create_async_engine(settings.database_url, echo=settings.app_env == "development")
+
+def _engine_kwargs() -> dict:
+    """Return extra kwargs for create_async_engine based on the database dialect."""
+    url = settings.database_url
+    kwargs: dict = {"echo": settings.app_env == "development"}
+    # asyncpg requires ssl=False instead of the sslmode=disable query param
+    if ("postgresql" in url or "postgres" in url) and "sslmode=disable" in url:
+        kwargs["connect_args"] = {"ssl": False}
+    return kwargs
+
+engine = create_async_engine(settings.async_database_url, **_engine_kwargs())
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
