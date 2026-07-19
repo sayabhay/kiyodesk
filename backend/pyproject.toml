@@ -1,0 +1,25 @@
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+ignore = ["B008"] # FastAPI's dependency injection intentionally uses Depends defaults.
+
+[tool.black]
+line-length = 100
+target-version = ["py313"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+exclude = ["alembic"]
+
+[[tool.mypy.overrides]]
+module = ["ccxt", "ccxt.*"]
+ignore_missing_imports = true
