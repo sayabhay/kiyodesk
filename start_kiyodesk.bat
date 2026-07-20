@@ -32,11 +32,12 @@ echo [1/4] Setting up Backend...
 cd backend
 if not exist venv (
     echo Creating virtual environment...
-    python -m venv venv
+    python -m venv venv || (echo [ERROR] Failed to create venv. Check permissions. && pause && exit /b 1)
 )
-call venv\Scripts\activate
-echo Installing backend dependencies...
-pip install -r requirements.txt >nul
+echo Activating environment and installing dependencies...
+call venv\Scripts\activate || (echo [ERROR] Failed to activate venv. && pause && exit /b 1)
+python -m pip install --upgrade pip >nul
+python -m pip install -r requirements.txt || (echo [ERROR] Failed to install requirements. && pause && exit /b 1)
 cd ..
 
 :: 4. Setup Frontend
