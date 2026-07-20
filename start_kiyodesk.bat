@@ -65,7 +65,8 @@ echo ----------------------------------------------------
 echo.
 
 :: Start Backend in a new window
-start "KiyoDesk Backend" cmd /k "cd backend && call venv\Scripts\activate && uvicorn app.main:app --reload --port 8000"
+:: Using direct path to python.exe in venv is more reliable on Windows than 'activate'
+start "KiyoDesk Backend" cmd /k "cd backend && venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000"
 
 :: Start Frontend in a new window
 start "KiyoDesk Frontend" cmd /k "cd frontend && npm run dev -- --port 5000"
