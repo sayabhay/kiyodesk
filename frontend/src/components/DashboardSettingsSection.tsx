@@ -8,7 +8,7 @@ const MODE_OPTIONS = [
 ]
 
 const TIMEFRAME_OPTIONS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d']
-const SYMBOL_OPTIONS = ['BTC', 'ETH', 'SOL', 'XRP', 'BNB', 'ADA', 'DOGE', 'LINK']
+const SYMBOL_OPTIONS = ['BTC', 'ETH', 'SOL', 'XRP', 'BNB', 'ADA', 'DOGE', 'LINK', 'ZEC', 'HYPE']
 const SL_MODE_OPTIONS = [
   { value: 'fixed', label: 'Fixed' },
   { value: 'swing_low', label: 'Swing Low' },
