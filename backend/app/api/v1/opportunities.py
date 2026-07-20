@@ -24,6 +24,8 @@ from app.schemas.opportunity import (
 )
 from app.schemas.trade import CreateTradeRequest, TradeDirection
 from app.services.trade_service import TradeService
+from app.schemas.events import Event
+from app.services.event_bus import event_bus
 
 router = APIRouter(prefix="/opportunities", tags=["opportunities"])
 
@@ -152,9 +154,20 @@ async def accept_opportunity(
     except InvalidTransitionError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
-    updated = await opp_repo.update(opp)
+        updated = await opp_repo.update(opp)
+    
+    # PR-6: Publish TradeAccepted event
+    await event_bus.publish(Event(
+        event_type="TradeAccepted",
+        source="OpportunitiesAPI",
+        payload={
+            "opportunity_id": str(updated.id),
+            "trade_id": str(trade_response.id),
+            "symbol": updated.symbol,
+        }
+    ))
+    
     return _to_response(updated)
-
 
 @router.post("/{opportunity_id}/reject", response_model=OpportunityResponse)
 async def reject_opportunity(
@@ -189,4 +202,15 @@ async def reject_opportunity(
         opp.metadata_json = _json.dumps(meta)
 
     updated = await opp_repo.update(opp)
+    
+    # PR-6: Publish SignalDismissed event
+    await event_bus.publish(Event(
+        event_type="SignalDismissed",
+        source="OpportunitiesAPI",
+        payload={
+            "opportunity_id": str(updated.id),
+            "symbol": updated.symbol,
+        }
+    ))
+    
     return _to_response(updated)

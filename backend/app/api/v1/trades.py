@@ -13,6 +13,8 @@ from app.providers.errors import (
 from app.providers.manager import ProviderManager
 from app.repositories.trade_repository import TradeRepository
 from app.schemas.trade import CloseTradeRequest, CreateTradeRequest, TradeResponse
+from app.schemas.events import Event
+from app.services.event_bus import event_bus
 from app.services.trade_service import TradeClosed, TradeNotFound, TradeService
 
 router = APIRouter(prefix="/trades", tags=["trades"])
@@ -27,7 +29,21 @@ async def create_trade(
     """Record a manually selected KScript trade with its market context."""
 
     try:
-        return await TradeService(TradeRepository(session), providers).create(request)
+        trade = await TradeService(TradeRepository(session), providers).create(request)
+        
+        # PR-6: Publish TradeOpened event
+        await event_bus.publish(Event(
+            event_type="TradeOpened",
+            source="TradesAPI",
+            payload={
+                "trade_id": str(trade.id),
+                "symbol": trade.symbol,
+                "direction": trade.direction,
+                "entry_price": float(trade.entry_price) if trade.entry_price else None,
+            }
+        ))
+        
+        return trade
     except ProviderConfigurationError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
@@ -61,7 +77,21 @@ async def close_trade(
     """Close an open trade, record the exit price, and calculate P&L."""
 
     try:
-        return await TradeService(TradeRepository(session), providers).close(trade_id, request)
+        trade = await TradeService(TradeRepository(session), providers).close(trade_id, request)
+        
+        # PR-6: Publish ManualClose event
+        await event_bus.publish(Event(
+            event_type="ManualClose",
+            source="TradesAPI",
+            payload={
+                "trade_id": str(trade.id),
+                "symbol": trade.symbol,
+                "exit_price": float(trade.exit_price) if trade.exit_price else None,
+                "pnl": float(trade.pnl) if trade.pnl else None,
+            }
+        ))
+        
+        return trade
     except TradeNotFound as error:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Trade not found."

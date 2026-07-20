@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_session
 from app.repositories.settings_repository import SettingsRepository
+from app.schemas.events import Event
+from app.services.event_bus import event_bus
 from app.schemas.settings import (
     DashboardSettingsResponse,
     UpdateDashboardSettingsRequest,
@@ -34,4 +36,12 @@ async def update_settings(
     repo = SettingsRepository(session)
     values = payload.model_dump(exclude_unset=True)
     settings = await repo.upsert(values)
+    
+    # PR-6: Publish SettingsUpdated event
+    await event_bus.publish(Event(
+        event_type="SettingsUpdated",
+        source="SettingsAPI",
+        payload=values
+    ))
+    
     return DashboardSettingsResponse.model_validate(settings)

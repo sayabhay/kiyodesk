@@ -36,6 +36,8 @@ Domain Engine
   ├── Replay Engine     🔲  v0.9
   └── Analytics
       ↓
+Event Bus — internal communication backbone
+      ↓
 Trade Opportunity  — persisted, ACTIVE → TAKEN | REJECTED | INVALIDATED | EXPIRED
       ↓
 Trade Journal  — accepted opportunities recorded as trades
@@ -77,6 +79,8 @@ Frontend proxies `/api` → `localhost:8000` via Vite dev server.
 | `frontend/src/api.ts` | All frontend API calls — relative `/api/v1` base |
 | `frontend/src/signals/SignalEventBus.ts` | Pub/sub bus for signal events |
 | `frontend/src/signals/useSignals.ts` | Polling hook — 10s interval, localStorage seen-tracking |
+| `backend/app/services/event_bus.py` | Internal async event bus for system-wide decoupling |
+| `backend/app/schemas/events.py` | Standard Event Model schema |
 
 ## Active Signals (live)
 

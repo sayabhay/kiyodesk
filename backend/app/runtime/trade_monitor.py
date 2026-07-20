@@ -14,6 +14,8 @@ from app.providers.manager import ProviderManager
 from app.repositories.opportunity_repository import OpportunityRepository
 from app.repositories.trade_repository import TradeRepository
 from app.runtime.lifecycle_manager import InvalidTransitionError, LifecycleManager
+from app.schemas.events import Event
+from app.services.event_bus import event_bus
 from app.services.trade_service import CloseTradeRequest, TradeService
 from app.database.session import AsyncSessionLocal
 from app.models.trade import Trade
@@ -85,6 +87,25 @@ class TradeMonitor:
         trade_service = TradeService(trade_repo, self._providers)
         try:
             closed_trade = await trade_service.close(trade.id, CloseTradeRequest(exit_price=price))
+            
+            # PR-6: Publish StopLossHit or TakeProfitHit or TradeClosed event
+            event_type = "TradeClosed"
+            if reason == "stop_loss":
+                event_type = "StopLossHit"
+            elif reason == "take_profit":
+                event_type = "TakeProfitHit"
+            
+            await event_bus.publish(Event(
+                event_type=event_type,
+                source="TradeMonitor",
+                payload={
+                    "trade_id": str(closed_trade.id),
+                    "symbol": closed_trade.symbol,
+                    "exit_price": float(closed_trade.exit_price) if closed_trade.exit_price else None,
+                    "pnl": float(closed_trade.pnl) if closed_trade.pnl else None,
+                    "reason": reason
+                }
+            ))
         except Exception as error:
             logger.error(
                 "TradeMonitor: failed to close trade #{}: {}",

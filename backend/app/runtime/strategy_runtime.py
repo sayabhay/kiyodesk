@@ -31,6 +31,8 @@ from app.repositories.opportunity_repository import OpportunityRepository
 from app.runtime.deduplicator import Deduplicator
 from app.runtime.opportunity_manager import OpportunityManager
 from app.runtime.timeframe_config import InvalidTimeframeError, resolve_htf
+from app.schemas.events import Event
+from app.services.event_bus import event_bus
 
 
 class StrategyRuntime:
@@ -185,4 +187,25 @@ class StrategyRuntime:
                 opportunity.status,
                 symbol,
             )
+
+            # PR-6: Publish SignalCreated or SignalUpdated event
+            # We determine if it's new by looking at the status and created_at/updated_at
+            # but OpportunityManager handles the persistence logic.
+            # For simplicity, we emit SignalCreated if created_at == updated_at
+            event_type = "SignalCreated" if opportunity.created_at == opportunity.updated_at else "SignalUpdated"
+            
+            await event_bus.publish(Event(
+                event_type=event_type,
+                source="TradingRuntime",
+                payload={
+                    "opportunity_id": str(opportunity.id),
+                    "symbol": opportunity.symbol,
+                    "direction": opportunity.direction,
+                    "status": opportunity.status,
+                    "entry": float(opportunity.entry) if opportunity.entry else None,
+                    "stop_loss": float(opportunity.stop_loss) if opportunity.stop_loss else None,
+                    "take_profit": float(opportunity.take_profit) if opportunity.take_profit else None,
+                }
+            ))
+
             return opportunity
