@@ -147,6 +147,7 @@ Modules:
 - `strategy_runtime.py` — resolves TFs at construction, fetches OHLCV concurrently, runs strategy, persists opportunity
 - `timeframe_config.py` — `VALID_TIMEFRAMES`, `DEFAULT_HTF_MAP`, `resolve_htf()`, `InvalidTimeframeError`
 - `market_listener.py` — callback adapter; swallows runtime errors
+- `trade_monitor.py` — monitors open journal trades, closes on stop-loss/take-profit, completes linked opportunities
 - `opportunity_manager.py` — create-or-update with deduplication
 - `lifecycle_manager.py` — all status transitions
 - `deduplicator.py` — prevents duplicate ACTIVE opportunities

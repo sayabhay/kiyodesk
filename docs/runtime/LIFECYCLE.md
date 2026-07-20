@@ -47,6 +47,9 @@
 
 All other transitions are invalid and raise `InvalidTransitionError`.
 
+`TradeMonitor` can drive the `TAKEN → COMPLETED` transition by closing the
+linked journal trade automatically when stop-loss or take-profit is hit.
+
 ---
 
 ## LifecycleManager

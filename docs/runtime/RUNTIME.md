@@ -169,16 +169,29 @@ and `volume` as `Decimal`.
 
 The Scheduler accepts an optional `on_refresh: Callable[[str], Awaitable[None]]`
 callback called **after** a successful market snapshot refresh for each symbol.
+It also supports an optional `on_idle: Callable[[], Awaitable[None]]` callback that
+runs once after all symbols are refreshed.
 
 ```python
 # In main.py lifespan:
 runtime  = StrategyRuntime(active_settings)   # validates TFs at construction time
 listener = MarketListener(runtime)
-scheduler = MarketScheduler(settings, provider_manager, on_refresh=listener)
+trade_monitor = TradeMonitor(provider_manager, AsyncSessionLocal)
+scheduler = MarketScheduler(
+    settings,
+    provider_manager,
+    on_refresh=listener,
+    on_idle=trade_monitor.run,
+)
 ```
 
 `MarketListener` wraps `StrategyRuntime` and swallows exceptions so a strategy
 error never propagates back to the Scheduler.
+
+`TradeMonitor` uses the `on_idle` hook to scan all open journal trades after a
+market refresh cycle, close any trades whose market price has crossed
+`stop_loss` or `take_profit`, and mark linked `TAKEN` opportunities as
+`COMPLETED`.
 
 ---
 
