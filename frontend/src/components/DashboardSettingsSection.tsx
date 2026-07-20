@@ -9,6 +9,10 @@ const MODE_OPTIONS = [
 
 const TIMEFRAME_OPTIONS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d']
 const SYMBOL_OPTIONS = ['BTC', 'ETH']
+const SL_MODE_OPTIONS = [
+  { value: 'fixed', label: 'Fixed' },
+  { value: 'swing_low', label: 'Swing Low' },
+]
 
 function fmtDecimal(value: string | null) {
   return value ?? ''
@@ -150,12 +154,16 @@ export function DashboardSettingsSection() {
               className="w-full bg-brand-700 border border-brand-600 rounded-lg px-3 py-2 text-sm text-white"
             />
             <label className="text-xs text-gray-400 block">SL mode</label>
-            <input
-              type="text"
+            <select
               value={form.stop_loss_mode ?? ''}
               onChange={(e) => updateField('stop_loss_mode', e.target.value)}
               className="w-full bg-brand-700 border border-brand-600 rounded-lg px-3 py-2 text-sm text-white"
-            />
+            >
+              <option value="">Default</option>
+              {SL_MODE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
             <label className="text-xs text-gray-400 block">Reward ratio</label>
             <input
               type="number"
