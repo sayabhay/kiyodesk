@@ -15,6 +15,7 @@ Provider Engine
       ↓
 Domain Engine
   ├── Strategy Engine       ✅ v0.5 — ICT Pure OTE, live signals on BTC/ETH
+  ├── MTF Engine            ✅ v0.5.2 — all 13 timeframes, auto-resolve, startup validation
   ├── Confidence Engine     🔲 v0.6
   ├── Market Regime Engine  🔲 v0.7
   ├── Replay Engine         🔲 v0.9
@@ -35,6 +36,7 @@ AI Assistant                🔲 v1.0
 - **0.4** ✅ Analytics
 - **0.5** ✅ Strategy Engine — ICT Pure OTE live on Replit; real OHLCV candles from Binance Futures; HTF trend filter active; signals firing on BTC and ETH
 - **0.5.1** ✅ Replit deployment — PostgreSQL, asyncpg SSL fix, relative API base URL, Vite proxy
+- **0.5.2** ✅ Multi-Timeframe Engine — all 13 TFs, `DEFAULT_HTF_MAP`, `resolve_htf()`, `InvalidTimeframeError`, startup validation, `STRATEGY_HTF_CANDLE_LIMIT`, 465 tests passing
 - **0.6** Confidence Engine — multi-factor signal scoring fed by Strategy Engine outputs
 - **0.7** Market Regime Engine — trend/range/expansion classification; gates Strategy Engine signals
 - **0.8** Multi-layer Chart Engine — annotated chart rendering driven by Domain Engine outputs

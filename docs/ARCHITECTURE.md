@@ -15,8 +15,9 @@ Provider Engine
       ↓
 Market Scheduler              — snapshot collection only, no business logic
       ↓
-Trading Runtime               ✅ v0.5.1  — fetches real OHLCV candles, orchestrates lifecycle
-  └── CandleFeed (Binance Futures /fapi/v1/klines — public, no API key)
+Trading Runtime               ✅ v0.5.2  — resolves TFs, fetches real OHLCV candles, orchestrates lifecycle
+  ├── timeframe_config.py     — VALID_TIMEFRAMES, DEFAULT_HTF_MAP, resolve_htf()
+  └── CandleFeed              — Binance Futures /fapi/v1/klines (public, no API key)
       ↓
 Domain Engine
   ├── Strategy Engine         ✅ v0.5  — ICT Pure OTE, produces TradeSetup (live signals on BTC/ETH)
@@ -45,6 +46,7 @@ sequenceDiagram
     participant DB as market_data table
     participant Listener as MarketListener
     participant Runtime as StrategyRuntime
+    participant TFConfig as timeframe_config.py
     participant Candles as CandleFeed (Binance Futures)
     participant Strategy as StrategyService
     participant OppMgr as OpportunityManager
@@ -54,17 +56,21 @@ sequenceDiagram
     participant TradeService
     participant Journal as trades table
 
+    Note over Runtime,TFConfig: At startup — resolve_htf(ltf, override) validated once
+    Runtime->>TFConfig: resolve_htf("15m") → "1h"
+
     Scheduler->>Provider: get_snapshot(symbol)
     Provider-->>DB: store MarketData row (price, funding, OI)
     Scheduler->>Listener: on_refresh(symbol)
     Listener->>Runtime: on_market_update(symbol)
 
     par Concurrent candle fetch
-        Runtime->>Candles: fetch_candles(symbol, "15m", 200) → LTF bars
-        Runtime->>Candles: fetch_candles(symbol, "4h",  100) → HTF bars
+        Runtime->>Candles: fetch_candles(symbol, ltf="15m", limit=200) → LTF bars
+        Runtime->>Candles: fetch_candles(symbol, htf="1h",  limit=100) → HTF bars
     end
 
     Runtime->>Strategy: evaluate(ltf_bars, htf_bars, config)
+    Note over Runtime,Strategy: use_htf_trend = len(htf_bars) >= 2 AND ltf != htf
     Strategy-->>Runtime: TradeSetup | None
 
     alt TradeSetup detected
@@ -123,8 +129,8 @@ on every scheduler tick — separate from the snapshot Provider Engine.
 ```
 fetch_candles(symbol, interval, limit) → list[Bar]
   symbol: "BTC" | "ETH"  →  mapped to "BTCUSDT" | "ETHUSDT"
-  interval: "15m" (LTF) | "4h" (HTF)
-  limit: 200 (LTF) | 100 (HTF)
+  interval: any VALID_TIMEFRAME string (e.g. "15m", "1h", "4h")
+  limit: strategy_candle_limit (LTF) | strategy_htf_candle_limit (HTF)
 ```
 
 ### Market Scheduler
@@ -132,22 +138,24 @@ fetch_candles(symbol, interval, limit) → list[Bar]
 Collects market snapshots on a 60-second interval. Calls the `on_refresh` callback after
 each successful symbol refresh. **Contains no business logic.**
 
-### Trading Runtime ✅ v0.5.1
+### Trading Runtime ✅ v0.5.2
 
 The orchestration layer. The **only** component allowed to connect
 Candle Feed → Strategy Engine → Trade Opportunities → Trade Journal.
 
 Modules:
-- `strategy_runtime.py` — fetches OHLCV candles, runs strategy, persists opportunity
+- `strategy_runtime.py` — resolves TFs at construction, fetches OHLCV concurrently, runs strategy, persists opportunity
+- `timeframe_config.py` — `VALID_TIMEFRAMES`, `DEFAULT_HTF_MAP`, `resolve_htf()`, `InvalidTimeframeError`
 - `market_listener.py` — callback adapter; swallows runtime errors
 - `opportunity_manager.py` — create-or-update with deduplication
 - `lifecycle_manager.py` — all status transitions
 - `deduplicator.py` — prevents duplicate ACTIVE opportunities
 
 On every scheduler tick the Runtime:
-1. Fetches 200 LTF bars (15m) and 100 HTF bars (4h) concurrently from Binance Futures
-2. Runs `StrategyService.evaluate()` with `use_htf_trend=True` (real 4h candles available)
-3. If a `TradeSetup` is detected, persists or updates the `TradeOpportunity`
+1. Resolves `htf = resolve_htf(ltf, override)` — done once at startup, not per tick
+2. Fetches LTF bars (`strategy_candle_limit`, default 200) and HTF bars (`strategy_htf_candle_limit`, default 100) **concurrently** from Binance Futures
+3. Runs `StrategyService.evaluate()` with `use_htf_trend = True` when `ltf != htf` and bars are available
+4. If a `TradeSetup` is detected, persists or updates the `TradeOpportunity`
 
 ### Domain Engine
 
@@ -205,7 +213,7 @@ app/domain/strategy/
 ### Strategy Engine Data Flow
 
 ```
-list[Bar] LTF (15m, 200 bars)  +  list[Bar] HTF (4h, 100 bars)  +  StrategyConfig
+list[Bar] LTF (e.g. 15m, 200 bars)  +  list[Bar] HTF (e.g. 1h, 100 bars)  +  StrategyConfig
         ↓
 StrategyEngine.evaluate()  [bar-by-bar replay via StrategyService]
         ↓
@@ -218,11 +226,12 @@ StrategyEngine.evaluate()  [bar-by-bar replay via StrategyService]
 
 ---
 
-## Trading Runtime — Module Map (v0.5.1)
+## Trading Runtime — Module Map (v0.5.2)
 
 ```
 app/runtime/
-  strategy_runtime.py     Fetches OHLCV candles → runs strategy → persists opportunity
+  strategy_runtime.py     Resolves TFs at init → fetches OHLCV → runs strategy → persists
+  timeframe_config.py     VALID_TIMEFRAMES, DEFAULT_HTF_MAP, InvalidTimeframeError, resolve_htf()
   market_listener.py      Callback adapter (scheduler → runtime)
   opportunity_manager.py  create_or_update with deduplication
   lifecycle_manager.py    Status transitions + InvalidTransitionError
@@ -235,6 +244,30 @@ app/repositories/opportunity_repository.py  Persistence layer
 app/schemas/opportunity.py        API request/response schemas
 app/api/v1/opportunities.py       5 REST endpoints
 ```
+
+### Multi-Timeframe Configuration
+
+`timeframe_config.py` defines the full MTF system:
+
+```python
+VALID_TIMEFRAMES = ('1m','3m','5m','15m','30m','1h','2h','4h','6h','12h','1d','1w','1M')
+
+DEFAULT_HTF_MAP = {
+    '1m': '5m',  '3m': '15m', '5m': '15m',
+    '15m': '1h', '30m': '4h',
+    '1h': '4h',  '2h': '12h', '4h': '12h',
+    '6h': '1d',  '12h': '1d',
+    '1d': '1w',  '1w': '1M',  '1M': '1M',
+}
+
+resolve_htf(ltf, override=None)
+  # override non-empty → return override (validated)
+  # override empty/None → return DEFAULT_HTF_MAP[ltf]
+  # invalid ltf or override → raise InvalidTimeframeError(ValueError)
+```
+
+`StrategyRuntime` validates both at `__init__` time — misconfiguration surfaces at startup,
+never silently on the first scheduler tick.
 
 ---
 
@@ -354,6 +387,8 @@ Prohibited AI inputs:
 - External code imports from `services/` only — never directly from `ict/`.
 - The Domain Engine must be independently testable without the API, Dashboard, or AI layers.
 - All frontend API calls must use relative URLs (`/api/v1/...`) — never `http://localhost:8000`.
+- Timeframes must be validated at construction time via `resolve_htf()` — startup must fail loudly on bad config.
+- HTF candles must always be fetched from the provider — never resampled from LTF data.
 
 ---
 
@@ -362,6 +397,6 @@ Prohibited AI inputs:
 - `docs/strategy/STRATEGY.md` — Strategy Engine usage and architecture
 - `docs/strategy/ICT.md` — ICT Pure OTE parameter reference and rule documentation
 - `docs/strategy/TRADE_SETUP.md` — TradeSetup field reference and consumer guide
-- `docs/runtime/RUNTIME.md` — Trading Runtime module map and data flow
+- `docs/runtime/RUNTIME.md` — Trading Runtime module map, MTF config, and data flow
 - `docs/runtime/OPPORTUNITIES.md` — TradeOpportunity field reference and API guide
 - `docs/runtime/LIFECYCLE.md` — Status machine, transitions, and LifecycleManager usage

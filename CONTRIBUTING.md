@@ -36,17 +36,37 @@ cd backend && PYTHONPATH=. python -m alembic upgrade head
 
 Set these in Replit's Secrets / environment panel (not in `.env` files):
 
-| Variable | Default | Required |
+| Variable | Default | Description |
 |---|---|---|
-| `MARKET_PROVIDERS` | `binance,coingecko` | No |
-| `MARKET_SYMBOLS` | `BTC,ETH` | No |
-| `CCXT_API_KEY` | — | No (public data works without) |
-| `CCXT_API_SECRET` | — | No |
-| `KIYOTAKA_API_KEY` | — | No |
-| `COINGECKO_API_KEY` | — | No (Pro key for higher limits) |
+| `MARKET_PROVIDERS` | `binance,coingecko` | Comma-separated provider failover order |
+| `MARKET_SYMBOLS` | `BTC,ETH` | Symbols to monitor |
+| `MARKET_REFRESH_SECONDS` | `60` | Scheduler interval in seconds |
+| `STRATEGY_TIMEFRAME` | `15m` | LTF execution timeframe (any of 13 supported values) |
+| `STRATEGY_HTF_TIMEFRAME` | *(empty)* | HTF override; empty = auto-resolve via `DEFAULT_HTF_MAP` |
+| `STRATEGY_CANDLE_LIMIT` | `200` | LTF bars fetched per evaluation |
+| `STRATEGY_HTF_CANDLE_LIMIT` | `100` | HTF bars fetched per evaluation |
+| `CCXT_API_KEY` | — | Optional — public data works without keys |
+| `CCXT_API_SECRET` | — | Optional |
+| `KIYOTAKA_API_KEY` | — | Optional |
+| `COINGECKO_API_KEY` | — | Optional Pro key for higher rate limits |
 
 The `DATABASE_URL` is managed by Replit and points to the project's PostgreSQL instance.
 Do not set it manually.
+
+---
+
+## Running Tests
+
+```bash
+cd backend && PYTHONPATH=. python -m pytest tests/ -v
+```
+
+465 tests must pass before any PR is merged. The test suite covers:
+
+- Strategy Engine (ICT logic, swing/BOS/OTE/risk)
+- Timeframe configuration (`VALID_TIMEFRAMES`, `DEFAULT_HTF_MAP`, `resolve_htf`, `InvalidTimeframeError`)
+- Trading Runtime (construction, MTF resolution, candle fetch, opportunity persistence)
+- API endpoints (opportunities, trades, market, analytics, recent signals)
 
 ---
 
@@ -64,6 +84,26 @@ These constraints are **non-negotiable** and must be upheld in every PR:
 6. **AI never receives raw market data.** The AI Assistant (v1.0) must only receive
    structured `TradeSetup`, `ConfidenceScore`, and `MarketRegime` objects.
 7. **kScript fidelity.** When Python behavior and kScript behavior differ, kScript wins.
+8. **Timeframes must be validated at construction time.** `StrategyRuntime.__init__` raises
+   `InvalidTimeframeError` on bad LTF or HTF override — never fail silently on first tick.
+9. **HTF candles must be fetched from the provider.** Never resample HTF bars from LTF data.
+
+---
+
+## Multi-Timeframe Configuration
+
+`STRATEGY_TIMEFRAME` accepts any of the 13 Binance Futures interval strings. The HTF is
+auto-resolved via `DEFAULT_HTF_MAP` unless `STRATEGY_HTF_TIMEFRAME` is set explicitly.
+
+```python
+from app.runtime.timeframe_config import resolve_htf
+
+resolve_htf("15m")              # → "1h"  (auto)
+resolve_htf("4h")               # → "12h" (auto)
+resolve_htf("1h", override="12h")  # → "12h" (manual)
+```
+
+See `docs/runtime/RUNTIME.md` for the full timeframe table and configuration examples.
 
 ---
 

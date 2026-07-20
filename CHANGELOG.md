@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.5.2 — Multi-Timeframe Engine Enhancement
+
+### Added
+- **`timeframe_config.py`** (`backend/app/runtime/timeframe_config.py`) — new module defining:
+  - `VALID_TIMEFRAMES` — all 13 Binance Futures interval strings (`1m 3m 5m 15m 30m 1h 2h 4h 6h 12h 1d 1w 1M`).
+  - `DEFAULT_HTF_MAP` — spec-required LTF→HTF auto-mapping (`15m→1h`, `1h→4h`, `4h→12h`, `12h→1d`, `1d→1w`, `1w→1M`, `1M→1M`, etc.).
+  - `InvalidTimeframeError` — `ValueError` subclass; message includes the bad value and the full valid list.
+  - `resolve_htf(ltf, override=None)` — resolves the HTF interval; override wins when non-empty; raises `InvalidTimeframeError` on any invalid value.
+- **`strategy_htf_candle_limit`** setting (`STRATEGY_HTF_CANDLE_LIMIT`, default `100`) — controls how many HTF bars are fetched per evaluation, independently of the LTF limit.
+- **47 new tests** in `backend/tests/test_timeframe_config.py` covering every spec-required mapping, all 13 override paths, wrong-case and empty-string errors, `InvalidTimeframeError` attributes and message content.
+- **34 new tests** in `backend/tests/test_strategy_runtime.py` covering runtime construction for all 13 LTF options, override path, invalid config startup failure, concurrent candle fetch with correct intervals and limits, HTF-filter bypass when `ltf == htf`, and `Settings` field defaults.
+
+### Changed
+- **`StrategyRuntime`** refactored:
+  - Resolves LTF and HTF at **construction time** — bad config raises `InvalidTimeframeError` on startup, not silently on first tick.
+  - Exposes `ltf_interval` and `htf_interval` as read-only properties.
+  - Fetches LTF and HTF candles **concurrently** (`asyncio.gather`), each with its own limit.
+  - HTF trend filter is **disabled automatically** when `ltf == htf` (monthly edge case — no higher timeframe exists).
+- **`strategy_htf_timeframe` default** changed from `"4h"` → `""` (empty string). Empty = auto-resolve via `DEFAULT_HTF_MAP`; any non-empty value = manual override.
+- All 465 tests pass (81 new + 384 pre-existing).
+
+---
+
 ## v0.5.1 — Replit Deployment & Live Signal Feed
 
 ### Added
