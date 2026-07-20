@@ -72,6 +72,11 @@ class OpportunityRepository:
         await self._session.refresh(opportunity)
         return opportunity
 
+    async def get_by_trade_id(self, trade_id: int) -> TradeOpportunity | None:
+        """Return the opportunity linked to a journal trade, if any."""
+        query = select(TradeOpportunity).where(TradeOpportunity.trade_id == trade_id)
+        return await self._session.scalar(query)
+
     async def find_duplicate(
         self,
         strategy: str,

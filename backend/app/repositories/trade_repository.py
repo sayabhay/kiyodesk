@@ -40,6 +40,15 @@ class TradeRepository:
         result = await self._session.scalars(query)
         return list(result)
 
+    async def list_open(self, symbol: str | None = None) -> list[Trade]:
+        """Return all currently open trades, optionally filtered by symbol."""
+
+        query = select(Trade).where(Trade.status == "open").order_by(Trade.created_at.desc())
+        if symbol is not None:
+            query = query.where(Trade.symbol == symbol.upper())
+        result = await self._session.scalars(query)
+        return list(result)
+
     async def close(
         self,
         trade: Trade,

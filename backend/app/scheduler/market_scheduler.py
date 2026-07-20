@@ -19,6 +19,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[impo
 from loguru import logger
 
 OnRefreshCallback = Callable[[str], Awaitable[None]]
+OnIdleCallback = Callable[[], Awaitable[None]]
 
 
 class MarketScheduler:
@@ -29,10 +30,12 @@ class MarketScheduler:
         settings: Settings,
         providers: ProviderManager,
         on_refresh: OnRefreshCallback | None = None,
+        on_idle: OnIdleCallback | None = None,
     ) -> None:
         self._settings = settings
         self._providers = providers
         self._on_refresh = on_refresh
+        self._on_idle = on_idle
         self._scheduler = AsyncIOScheduler()
 
     def start(self) -> None:
@@ -76,3 +79,9 @@ class MarketScheduler:
                         await self._on_refresh(symbol)
                     except Exception as error:
                         logger.error("on_refresh callback failed for {}: {}", symbol, error)
+
+            if self._on_idle is not None:
+                try:
+                    await self._on_idle()
+                except Exception as error:
+                    logger.error("on_idle callback failed after market refresh: {}", error)

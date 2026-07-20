@@ -73,5 +73,8 @@ class TradeOpportunity(Base):
     # Arbitrary future metadata
     metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Immutable risk/snapshot metadata for the opportunity at creation time.
+    trade_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Deduplication tolerance — stored for audit
     entry_tolerance: Mapped[Decimal] = mapped_column(Numeric(20, 8), default=Decimal("0.01"))

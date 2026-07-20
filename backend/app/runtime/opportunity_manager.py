@@ -11,7 +11,9 @@ from decimal import Decimal
 from app.domain.strategy.models.trade_setup import TradeSetup
 from app.models.trade_opportunity import OpportunityStatus, TradeOpportunity
 from app.repositories.opportunity_repository import OpportunityRepository
+from app.repositories.settings_repository import SettingsRepository
 from app.runtime.deduplicator import Deduplicator
+import json
 
 _DEFAULT_TTL_HOURS = 4
 _DEFAULT_TOLERANCE = Decimal("0.01")
@@ -57,6 +59,22 @@ class OpportunityManager:
             return await self._repository.update(existing)
 
         now = datetime.now(tz=UTC)
+
+        snapshot: dict[str, str | None] = {}
+        try:
+            settings_repo = SettingsRepository(self._repository._session)
+            settings = await settings_repo.get()
+        except Exception:
+            settings = None
+
+        if settings is not None:
+            snapshot = {
+                "risk_percent": str(settings.risk_percent) if settings.risk_percent is not None else None,
+                "fixed_risk": str(settings.fixed_risk) if settings.fixed_risk is not None else None,
+                "account_balance": str(settings.account_balance) if settings.account_balance is not None else None,
+                "execution_mode": settings.execution_mode,
+            }
+
         opportunity = TradeOpportunity(
             strategy=setup.strategy,
             strategy_version=setup.config_snapshot.model_dump().get("strategy_version"),
@@ -75,5 +93,6 @@ class OpportunityManager:
             market_regime=None,  # populated by Market Regime Engine in v0.7
             trade_setup_json=setup_json,
             entry_tolerance=self._deduplicator.tolerance,
+            trade_snapshot_json=json.dumps(snapshot),
         )
         return await self._repository.create(opportunity)

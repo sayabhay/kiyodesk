@@ -6,10 +6,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import analytics, market, opportunities, providers, strategy, system, trades
+from app.api.v1 import analytics, market, opportunities, providers, settings as settings_api, strategy, system, trades
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
-from app.database.session import dispose_database, initialize_database
+from app.database.session import AsyncSessionLocal, dispose_database, initialize_database
 from app.models import ApiUsage, TradeOpportunity  # noqa: F401
 from app.providers.base import MarketDataProvider
 from app.providers.binance import BinanceProvider
@@ -19,6 +19,7 @@ from app.providers.kiyotaka import KiyotakaProvider
 from app.providers.manager import ProviderManager
 from app.runtime.market_listener import MarketListener
 from app.runtime.strategy_runtime import StrategyRuntime
+from app.runtime.trade_monitor import TradeMonitor
 from app.scheduler.market_scheduler import MarketScheduler
 
 
@@ -51,10 +52,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await initialize_database()
         runtime = StrategyRuntime(active_settings)
         listener = MarketListener(runtime)
+        trade_monitor = TradeMonitor(application.state.provider_manager, AsyncSessionLocal)
         scheduler = MarketScheduler(
             active_settings,
             application.state.provider_manager,
             on_refresh=listener,
+            on_idle=trade_monitor.run,
         )
         application.state.market_scheduler = scheduler
         application.state.strategy_runtime = runtime
@@ -84,6 +87,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(analytics.router, prefix=active_settings.api_v1_prefix)
     application.include_router(strategy.router, prefix=active_settings.api_v1_prefix)
     application.include_router(opportunities.router, prefix=active_settings.api_v1_prefix)
+    application.include_router(settings_api.router, prefix=active_settings.api_v1_prefix)
     return application
 
 
