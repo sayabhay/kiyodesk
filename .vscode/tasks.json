@@ -1,0 +1,22 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Start KiyoDesk (One-Click)",
+            "type": "shell",
+            "command": ".\\start_kiyodesk.bat",
+            "windows": {
+                "command": ".\\start_kiyodesk.bat"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": []
+        }
+    ]
+}

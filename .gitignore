@@ -31,7 +31,7 @@ build/
 .ruff_cache/
 
 # IDE
-.vscode/
+# .vscode/  <-- Un-ignored to share startup tasks
 .idea/
 
 # OS
