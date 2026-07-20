@@ -49,7 +49,8 @@ cd ..
 
 :: 5. Launch VS Code
 echo [3/4] Opening VS Code...
-code .
+:: Use 'start' to launch VS Code so the script continues immediately
+start "" code .
 if %errorlevel% neq 0 (
     echo [WARN] 'code' command not found. Make sure VS Code is installed and in PATH.
 )
