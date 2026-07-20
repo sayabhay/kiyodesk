@@ -5,6 +5,7 @@ import { MarketSection } from './components/MarketSection'
 import { OpportunitiesSection } from './components/OpportunitiesSection'
 import { TradeJournal } from './components/TradeJournal'
 import { AnalyticsSection } from './components/AnalyticsSection'
+import { DashboardSettingsSection } from './components/DashboardSettingsSection'
 import { NewTradeModal } from './components/NewTradeModal'
 import { useSignals } from './signals/useSignals'
 import { useState } from 'react'
@@ -56,6 +57,7 @@ function AppContent() {
         <SignalCenter state={signalState} />
 
         <MarketSection />
+        <DashboardSettingsSection />
         <OpportunitiesSection />
         <AnalyticsSection />
         <TradeJournal />

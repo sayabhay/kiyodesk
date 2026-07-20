@@ -108,6 +108,25 @@ export interface TradeOpportunity {
   reasons: string[]
   warnings: string[]
   trade_setup_json: string
+  trade_snapshot_json: string | null
+}
+
+export interface DashboardSettings {
+  id: number
+  symbols: string | null
+  timeframes: string | null
+  htf_mapping_json: string | null
+  risk_percent: string | null
+  fixed_risk: string | null
+  stop_loss_mode: string | null
+  swing_buffer: string | null
+  reward_ratio: string | null
+  max_concurrent_trades: number | null
+  max_daily_loss: string | null
+  max_weekly_loss: string | null
+  execution_mode: string | null
+  account_balance: string | null
+  metadata_json: string | null
 }
 
 export const api = {
@@ -137,6 +156,14 @@ export const api = {
 
   getOpportunities: (symbol?: string) =>
     request<TradeOpportunity[]>(`/opportunities/active${symbol ? `?symbol=${symbol}` : ''}`),
+
+  getSettings: () => request<DashboardSettings>('/settings'),
+
+  updateSettings: (payload: Partial<DashboardSettings>) =>
+    request<DashboardSettings>('/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
 
   acceptOpportunity: (id: number) =>
     request<TradeOpportunity>(`/opportunities/${id}/accept`, {

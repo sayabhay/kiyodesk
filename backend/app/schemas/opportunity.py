@@ -42,6 +42,7 @@ class OpportunityResponse(BaseModel):
 
     # Raw JSON for clients that want the full TradeSetup
     trade_setup_json: str
+    trade_snapshot_json: str | None = None
 
     @model_validator(mode="before")
     @classmethod

@@ -11,6 +11,7 @@
 - **`strategy_htf_candle_limit`** setting (`STRATEGY_HTF_CANDLE_LIMIT`, default `100`) — controls how many HTF bars are fetched per evaluation, independently of the LTF limit.
 - **47 new tests** in `backend/tests/test_timeframe_config.py` covering every spec-required mapping, all 13 override paths, wrong-case and empty-string errors, `InvalidTimeframeError` attributes and message content.
 - **34 new tests** in `backend/tests/test_strategy_runtime.py` covering runtime construction for all 13 LTF options, override path, invalid config startup failure, concurrent candle fetch with correct intervals and limits, HTF-filter bypass when `ltf == htf`, and `Settings` field defaults.
+- **Dashboard settings persistence** — frontend dashboard settings panel now saves strategy, risk, and execution configuration through the backend `/api/v1/settings` endpoint.
 
 ### Changed
 - **`StrategyRuntime`** refactored:

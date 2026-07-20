@@ -96,6 +96,7 @@ cd backend && PYTHONPATH=. python -m alembic upgrade head
 
 - **Signal Center** — ICT Pure OTE signals on BTC and ETH, auto-refreshes every 10s. Default: 15m LTF + 1h HTF (auto-resolved).
 - **Multi-Timeframe Engine** — configurable LTF execution across all 13 timeframes; HTF auto-resolved or manually overridden; both validated at startup.
+- **Dashboard Settings** — persisted strategy, risk, and execution configuration via a dedicated frontend settings panel and `/api/v1/settings` backend endpoint.
 - **Live Market** — real-time price, funding rate, and open interest from Binance Futures (no API key)
 - **Active Opportunities** — persisted setups with Accept / Reject workflow
 - **Trade Journal** — records accepted opportunities with entry, SL, TP, and P&L tracking
